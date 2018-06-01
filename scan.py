@@ -57,7 +57,7 @@ def is_object_scannable(s3_object):
         lf.write(s3_object.bucket_name + "/" + s3_object.key + "\n")
         lf.close()
         LOG.upload_file(LOGFILE)
-        raise SizeError("File too big for lambda")
+        raise SizeError("Too big for lambda: %s" % (s3_object.key))
     if (summary.storage_class == 'GLACIER'):
         lf.write(s3_object.bucket_name + "/" + s3_object.key + "\n")
         lf.close()
