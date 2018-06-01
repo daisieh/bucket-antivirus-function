@@ -31,7 +31,7 @@ from distutils.util import strtobool
 from optparse import OptionParser
 
 ENV = os.getenv("ENV", "")
-LOG = s3.Object("dryad-logs", "unscanned_files.txt")
+LOG = s3.Object(AV_DEFINITION_S3_BUCKET, AV_SKIPPED_FILES)
 LOGFILE = "/tmp/logfile"
 LARGE_FILE_TEMP_PATH = "/transfer-complete/temp"
 
