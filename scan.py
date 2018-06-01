@@ -205,7 +205,7 @@ def main():
     parser.add_option("--file", dest="file", help="File containing list of bucket/key values to scan")
     (options, args) = parser.parse_args()
 
-    if options['file'] is None:
+    if options.file is None:
         # copy down the current log file, if it exists
         try:
             LOG.download_file(LOGFILE)
@@ -214,7 +214,7 @@ def main():
         except botocore.exceptions.ClientError as e:
             sys.exit()
     else:
-        keyfile = options['file']
+        keyfile = options.file
     
     lf = open(keyfile,"r")
 
