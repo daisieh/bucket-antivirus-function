@@ -28,6 +28,7 @@ import re
 from common import *
 from datetime import datetime
 from distutils.util import strtobool
+from optparse import OptionParser
 
 ENV = os.getenv("ENV", "")
 LOG = s3.Object("dryad-logs", "unscanned_files.txt")
@@ -200,14 +201,22 @@ def str_to_bool(s):
     return bool(strtobool(str(s)))
 
 def main():
-    # copy down the current log file, if it exists
-    try:
-        LOG.download_file(LOGFILE)
-        LOG.delete()
-    except botocore.exceptions.ClientError as e:
-        sys.exit()
+    parser = OptionParser()
+    parser.add_option("--file", dest="file", help="File containing list of bucket/key values to scan")
+    (options, args) = parser.parse_args()
+
+    if options.file is None:
+        # copy down the current log file, if it exists
+        try:
+            LOG.download_file(LOGFILE)
+            LOG.delete()
+            keyfile = LOGFILE
+        except botocore.exceptions.ClientError as e:
+            sys.exit()
+    else:
+        keyfile = options.file
     
-    lf = open(LOGFILE,"r")
+    lf = open(keyfile,"r")
 
     clamav.update_defs_from_s3(AV_DEFINITION_S3_BUCKET, AV_DEFINITION_S3_PREFIX)
     for object in lf.readlines():
