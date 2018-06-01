@@ -205,7 +205,6 @@ def main():
         LOG.download_file(LOGFILE)
         LOG.delete()
     except botocore.exceptions.ClientError as e:
-        print("Couldn't find the log file: it is probably being written right now")
         sys.exit()
     
     lf = open(LOGFILE,"r")
