@@ -19,6 +19,8 @@ import copy
 import json
 import metrics
 import urllib
+import sys
+import re
 from common import *
 from datetime import datetime
 from distutils.util import strtobool
@@ -26,6 +28,7 @@ from distutils.util import strtobool
 ENV = os.getenv("ENV", "")
 LOG = s3.Object("dryad-logs", "unscanned_files.txt")
 LOGFILE = "/tmp/logfile"
+LARGE_FILE_TEMP_PATH = "/transfer-complete/temp"
 
 class SizeError(Exception):
     def __init__(self, msg):
@@ -191,3 +194,39 @@ def scan_object(s3_object):
 
 def str_to_bool(s):
     return bool(strtobool(str(s)))
+
+def main():
+    # copy down the current log file, if it exists
+    try:
+        LOG.download_file(LOGFILE)
+        LOG.delete()
+    except botocore.exceptions.ClientError as e:
+        print("Couldn't find the log file: it is probably being written right now")
+        sys.exit()
+    
+    lf = open(LOGFILE,"r")
+
+    clamav.update_defs_from_s3(AV_DEFINITION_S3_BUCKET, AV_DEFINITION_S3_PREFIX)
+    for object in lf.readlines():
+        s3_pieces = re.match("^(.+?)\/(.+)", object)
+        bucket_name = s3_pieces.group(1)
+        key = s3_pieces.group(2)
+        s3_object = s3.Object(bucket_name, key)
+        print("Scanning " + object)
+        sns_start_scan(s3_object)
+        file_path = download_s3_object(s3_object, LARGE_FILE_TEMP_PATH)
+        scan_result = clamav.scan_file(file_path)
+        print("Scan of s3://%s resulted in %s\n" % (os.path.join(s3_object.bucket_name, s3_object.key), scan_result))
+        if "AV_UPDATE_METADATA" in os.environ:
+            set_av_metadata(s3_object, scan_result)
+        set_av_tags(s3_object, scan_result)
+        sns_scan_results(s3_object, scan_result)
+        metrics.send(env=ENV, bucket=s3_object.bucket_name, key=s3_object.key, status=scan_result)
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
+
+if __name__ == '__main__':
+    main()
