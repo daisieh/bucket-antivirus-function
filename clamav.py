@@ -133,4 +133,5 @@ def scan_file(path):
     else:
         msg = "Unexpected exit code from clamscan: %s.\n" % av_proc.returncode
         print(msg)
+        print("Make sure the CLAM variables in common.py are set correctly for this system")
         raise Exception(msg)
