@@ -226,19 +226,21 @@ def main():
         s3_object = s3.Object(bucket_name, key)
         print("Scanning " + object)
         sns_start_scan(s3_object)
-        file_path = download_s3_object(s3_object, LARGE_FILE_TEMP_PATH)
-        scan_result = clamav.scan_file(file_path)
-        print("Scan of s3://%s resulted in %s\n" % (os.path.join(s3_object.bucket_name, s3_object.key), scan_result))
-        if "AV_UPDATE_METADATA" in os.environ:
-            set_av_metadata(s3_object, scan_result)
-        set_av_tags(s3_object, scan_result)
-        sns_scan_results(s3_object, scan_result)
-        metrics.send(env=ENV, bucket=s3_object.bucket_name, key=s3_object.key, status=scan_result)
         try:
-            os.remove(file_path)
-        except OSError:
+            file_path = download_s3_object(s3_object, LARGE_FILE_TEMP_PATH)
+            scan_result = clamav.scan_file(file_path)
+            print("Scan of s3://%s resulted in %s\n" % (os.path.join(s3_object.bucket_name, s3_object.key), scan_result))
+            if "AV_UPDATE_METADATA" in os.environ:
+                set_av_metadata(s3_object, scan_result)
+            set_av_tags(s3_object, scan_result)
+            sns_scan_results(s3_object, scan_result)
+            metrics.send(env=ENV, bucket=s3_object.bucket_name, key=s3_object.key, status=scan_result)
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        except botocore.exceptions.ClientError:
             pass
-
 
 if __name__ == '__main__':
     main()
