@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import boto3
+import botocore
 import clamav
 import copy
 import json
@@ -23,7 +24,12 @@ from datetime import datetime
 from distutils.util import strtobool
 
 ENV = os.getenv("ENV", "")
+LOG = s3.Object("dryad-logs", "unscanned_files.txt")
+LOGFILE = "/tmp/logfile"
 
+class SizeError(Exception):
+    def __init__(self, msg):
+        self.msg = msg
 
 def event_object(event):
     bucket = event['Records'][0]['s3']['bucket']['name']
@@ -32,6 +38,29 @@ def event_object(event):
         print("Unable to retrieve object from event.\n%s" % event)
         raise Exception("Unable to retrieve object from event.")
     return s3.Object(bucket, key)
+
+def is_object_scannable(s3_object):
+    # copy down the current log file, if it exists
+    try:
+        LOG.download_file(LOGFILE)
+        LOG.delete()
+    except botocore.exceptions.ClientError as e:
+        pass
+
+    lf = open(LOGFILE,"a")
+    summary = s3.ObjectSummary(s3_object.bucket_name, s3_object.key)
+    summary.load()
+    if (summary.size > 500000000):
+        lf.write(s3_object.bucket_name + "/" + s3_object.key + "\n")
+        lf.close()
+        LOG.upload_file(LOGFILE)
+        raise SizeError("File too big for lambda")
+    if (summary.storage_class == 'GLACIER'):
+        lf.write(s3_object.bucket_name + "/" + s3_object.key + "\n")
+        lf.close()
+        LOG.upload_file(LOGFILE)
+        raise SizeError("Object is in " + summary.storage_class)
+        
 
 def verify_s3_object_version(s3_object):
     # validate that we only process the original version of a file, if asked to do so
@@ -128,11 +157,22 @@ def sns_scan_results(s3_object, result):
 
 
 def lambda_handler(event, context):
+    s3_object = event_object(event)
     start_time = datetime.utcnow()
     print("Script starting at %s\n" %
           (start_time.strftime("%Y/%m/%d %H:%M:%S UTC")))
-    s3_object = event_object(event)
+    scan_object(s3_object)
+    print("Script finished at %s\n" %
+          datetime.utcnow().strftime("%Y/%m/%d %H:%M:%S UTC"))
+
+
+def scan_object(s3_object):
     verify_s3_object_version(s3_object)
+    try:
+        is_object_scannable(s3_object)
+    except SizeError as e:
+        print(e.msg)
+        return
     sns_start_scan(s3_object)
     file_path = download_s3_object(s3_object, "/tmp")
     clamav.update_defs_from_s3(AV_DEFINITION_S3_BUCKET, AV_DEFINITION_S3_PREFIX)
@@ -148,8 +188,6 @@ def lambda_handler(event, context):
         os.remove(file_path)
     except OSError:
         pass
-    print("Script finished at %s\n" %
-          datetime.utcnow().strftime("%Y/%m/%d %H:%M:%S UTC"))
 
 def str_to_bool(s):
     return bool(strtobool(str(s)))
