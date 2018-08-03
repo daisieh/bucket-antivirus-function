@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 # Upside Travel, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Modifications for Dryad made by Daisie Huang
+
 import boto3
 import botocore
 import clamav
@@ -19,13 +23,17 @@ import copy
 import json
 import metrics
 import urllib
+import sys
+import re
 from common import *
 from datetime import datetime
 from distutils.util import strtobool
+from optparse import OptionParser
 
 ENV = os.getenv("ENV", "")
 LOG = s3.Object("dryad-logs", "unscanned_files.txt")
 LOGFILE = "/tmp/logfile"
+LARGE_FILE_TEMP_PATH = "/transfer-complete/temp"
 
 class SizeError(Exception):
     def __init__(self, msg):
@@ -54,7 +62,7 @@ def is_object_scannable(s3_object):
         lf.write(s3_object.bucket_name + "/" + s3_object.key + "\n")
         lf.close()
         LOG.upload_file(LOGFILE)
-        raise SizeError("File too big for lambda")
+        raise SizeError("Too big for lambda: %s" % (s3_object.key))
     if (summary.storage_class == 'GLACIER'):
         lf.write(s3_object.bucket_name + "/" + s3_object.key + "\n")
         lf.close()
@@ -191,3 +199,48 @@ def scan_object(s3_object):
 
 def str_to_bool(s):
     return bool(strtobool(str(s)))
+
+def main():
+    parser = OptionParser()
+    parser.add_option("--file", dest="file", help="File containing list of bucket/key values to scan")
+    (options, args) = parser.parse_args()
+
+    if options.file is None:
+        # copy down the current log file, if it exists
+        try:
+            LOG.download_file(LOGFILE)
+            LOG.delete()
+            keyfile = LOGFILE
+        except botocore.exceptions.ClientError as e:
+            sys.exit()
+    else:
+        keyfile = options.file
+    
+    lf = open(keyfile,"r")
+
+    clamav.update_defs_from_s3(AV_DEFINITION_S3_BUCKET, AV_DEFINITION_S3_PREFIX)
+    for object in lf.readlines():
+        s3_pieces = re.match("^(.+?)\/(.+)", object)
+        bucket_name = s3_pieces.group(1)
+        key = s3_pieces.group(2)
+        s3_object = s3.Object(bucket_name, key)
+        print("Scanning " + object)
+        sns_start_scan(s3_object)
+        try:
+            file_path = download_s3_object(s3_object, LARGE_FILE_TEMP_PATH)
+            scan_result = clamav.scan_file(file_path)
+            print("Scan of s3://%s resulted in %s\n" % (os.path.join(s3_object.bucket_name, s3_object.key), scan_result))
+            if "AV_UPDATE_METADATA" in os.environ:
+                set_av_metadata(s3_object, scan_result)
+            set_av_tags(s3_object, scan_result)
+            sns_scan_results(s3_object, scan_result)
+            metrics.send(env=ENV, bucket=s3_object.bucket_name, key=s3_object.key, status=scan_result)
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        except botocore.exceptions.ClientError:
+            pass
+
+if __name__ == '__main__':
+    main()
