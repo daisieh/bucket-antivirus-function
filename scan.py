@@ -30,6 +30,8 @@ from datetime import datetime
 from distutils.util import strtobool
 from optparse import OptionParser
 
+# cronjob is executed as 'export AV_DEFINITION_S3_BUCKET=dryad-av-definitions;export CLAMSCAN_PATH=/usr/bin/clamscan;export CLAMAVLIB_PATH=/usr/bin;export FRESHCLAM_PATH=/usr/bin/freshclam;/home/daisieh/bucket-antivirus-function/scan.py'
+
 ENV = os.getenv("ENV", "")
 LOG = s3.Object("dryad-logs", "unscanned_files.txt")
 LOGFILE = "/tmp/logfile"
